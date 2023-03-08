@@ -1,0 +1,68 @@
+name: Create Release
+
+concurrency:
+  group: ci-${{ github.repository }}-release
+  cancel-in-progress: false
+
+on:
+  push:
+    branches:
+      - "main"
+
+env:
+  IMAGE_NAME: "ghcr.io/${{ github.repository_owner }}/docusaurus-dev-container"
+
+jobs:
+  create_release:
+    uses: fullstack-devops/git-workflows/.github/workflows/create-release.yml@main
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    runs-on: ubuntu-latest
+    needs: create_release
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login to Red Hat Quay
+        uses: docker/login-action@v2
+        with:
+          registry: quay.io
+          username: ${{ secrets.RH_QUAY_USERNAME }}
+          password: ${{ secrets.RH_QUAY_PASSWORD }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build github-actions-runner:base
+        uses: docker/build-push-action@v4
+        with:
+          push: true
+          tags: |
+            ghcr.io/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ env.IMAGE_NAME }}:${{needs.create_release.outputs.version}}
+            quay.io/${{ env.IMAGE_NAME }}:latest
+            quay.io/${{ env.IMAGE_NAME }}:${{needs.create_release.outputs.version}}
+
+  publish_release:
+    runs-on: ubuntu-latest
+    needs: [create_release, build_base, build_flavours]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup awesome-ci
+        uses: fullstack-devops/awesome-ci-action@main
+
+      - name: Publish Release
+        run: awesome-ci release publish --release-id ${{ needs.create_release.outputs.releaseid }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
